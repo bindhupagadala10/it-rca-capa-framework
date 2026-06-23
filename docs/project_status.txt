@@ -1,0 +1,76 @@
+IT RCA-CAPA FRAMEWORK
+
+Current Date:
+24 June 2026
+
+Status: COMPLETE
+
+Original Records:
+1464
+
+Clean Records:
+1455
+
+RCA Samples:
+1455
+
+CAPA Samples:
+1454
+
+Dataset Split:
+
+RCA
+Train: 1164
+Validation: 145
+Test: 146
+
+CAPA
+Train: 1163
+Validation: 145
+Test: 146
+
+Model 1:
+Qwen2.5-3B-Instruct
+
+Input:
+
+Problem Description
+Business Impact
+Technical Investigation Timeline
+
+Output:
+
+5 Why Analysis
+Root Cause Summary
+
+Model 2:
+Mistral-7B-Instruct
+
+Input:
+
+5 Why Analysis
+Root Cause Summary
+
+Output:
+
+Corrective Actions
+Preventive Actions
+Lessons Learned
+
+Model 3:
+PDF Generator
+
+Input:
+Structured RCA Output
+
+Output:
+Enterprise RCA Report PDF
+
+Fine-tune Qwen2.5-3B-Instruct
+Evaluate RCA quality
+Fine-tune Mistral-7B-Instruct
+Evaluate CAPA quality
+Build PDF generation layer
+Add RAG support using SOP documents
+
+Ready for Model Training

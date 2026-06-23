@@ -1,0 +1,50 @@
+# Python
+
+**pycache**/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environments
+
+venv/
+.env
+.venv/
+
+# Jupyter
+
+.ipynb_checkpoints/
+
+# Training Outputs
+
+outputs/
+checkpoints/
+models/
+logs/
+
+# HuggingFace
+
+.cache/
+hf_cache/
+
+# VS Code
+
+.vscode/
+
+# OS
+
+.DS_Store
+Thumbs.db
+
+# Temporary
+
+temp/
+tmp/
+
+# Large Artifacts
+
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
