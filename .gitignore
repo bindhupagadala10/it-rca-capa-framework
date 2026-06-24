@@ -48,3 +48,19 @@ tmp/
 *.pth
 *.ckpt
 *.safetensors
+
+# Models
+models/
+qwen_rca_adapter/
+*.safetensors
+
+# Python
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
