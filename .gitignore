@@ -110,3 +110,10 @@ app/app_test.py
 qwen_rca_adapter/
 models/emergency_mistral_epoch1/
 >>>>>>> bafb3c8 (Implement RCA-CAPA validation framework and frontend integration)
+models/
+
+# Model archives
+*.zip
+
+# Trained adapters (optional)
+models/*.zip

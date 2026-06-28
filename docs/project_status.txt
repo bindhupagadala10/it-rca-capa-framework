@@ -74,3 +74,23 @@ Build PDF generation layer
 Add RAG support using SOP documents
 
 Ready for Model Training
+
+## Completed
+
+- Fine-tuned RCA model integrated
+- Fine-tuned CAPA model integrated
+- Streamlit workflow completed
+- Lazy loading implemented
+- Validation pipeline completed
+- DOCX generation implemented
+
+## Remaining
+
+- Improve DOCX formatting
+- Improve parser for question/answer separation
+- Final testing
+
+- 5 Why table duplicates question into answer column in DOCX
+- DOCX spacing requires polishing
+- RCA outputs can occasionally be shorter than desired
+- CAPA output verbosity can be improved

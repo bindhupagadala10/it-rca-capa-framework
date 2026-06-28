@@ -87,3 +87,23 @@ ROUGE-2: 0.1439
 ROUGE-L: 0.2352
 BERTScore F1: 0.8798
 Validation Loss: 1.3978
+
+### v0.x
+
+Added
+
+- Lazy loading for Qwen and Mistral
+- Wrapper inference modules
+- CAPA generation pipeline
+- Validation workflow
+- Streamlit integration
+
+Changed
+
+- Parser updated for RCA
+- Parser updated for CAPA
+
+Fixed
+
+- 5 Why rendering
+- Streamlit inference pipeline

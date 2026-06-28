@@ -162,16 +162,22 @@ docs/
 ## Current Status
 
 Phase 1: Dataset Engineering
-Status: Complete
 
 Phase 2: RCA Model Training
-Status: In Progress
 
 Phase 3: CAPA Model Training
-Status: Planned
 
-Phase 4: PDF Report Generation
-Status: Planned
+Phase 4: DOCX Report Generation
 
 Phase 5: RAG Integration with Enterprise SOPs
 Status: Planned
+
+Feature list:
+✔ RCA generation using fine-tuned Qwen2.5-3B
+✔ CAPA generation using fine-tuned Mistral-7B
+✔ Lazy model loading to reduce GPU memory usage
+✔ RCA validation engine
+✔ CAPA validation engine
+✔ Human review and regeneration workflow
+✔ DOCX report generation
+✔ Streamlit interface

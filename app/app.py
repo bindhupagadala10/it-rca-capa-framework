@@ -13,8 +13,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 # To switch to real model inference, comment/uncomment the lines below:
-from src.inference.mock_inference import generate_mock_rca as generate_rca, generate_mock_capa as generate_capa
-# from src.inference.rca_inference import generate_rca; from src.inference.capa_inference import generate_capa
+#from src.inference.mock_inference import generate_mock_rca as generate_rca, generate_mock_capa as generate_capa
+from src.inference.rca_inference import generate_rca, generate_rca_from_incident
+from src.inference.capa_inference import generate_capa_from_rca
 from src.report.doc_generator import generate_docx
 from src.validators.capa_validator import CAPAValidator
 from src.validators.input_validator import validate_incident_input
@@ -79,53 +80,163 @@ def restore_editor_state() -> None:
 
 
 def section_text(text: str, heading: str, following_headings: tuple[str, ...]) -> str:
+
+    # Accept headings with optional "Summary" and optional colon.
+    heading_pattern = re.escape(heading)
+
+    if heading.lower() == "root cause":
+        heading_pattern = r"Root Cause(?: Summary)?"
+
     if not following_headings:
         match = re.search(
-            rf"(?ims)^\s*{re.escape(heading)}\s*$\s*(.*)\Z",
+            rf"(?ims)^\s*{heading_pattern}\s*:?\s*$\s*(.*)\Z",
             text,
         )
         return match.group(1).strip() if match else ""
 
-    end_pattern = "|".join(re.escape(item) for item in following_headings)
+    end_pattern = "|".join(
+        re.escape(item).replace(r"\ ", r"\s+") + r"\s*:?"
+        for item in following_headings
+    )
+
     match = re.search(
-        rf"(?ims)^\s*{re.escape(heading)}\s*$\s*(.*?)"
+        rf"(?ims)"
+        rf"^\s*{heading_pattern}\s*:?\s*$"
+        rf"\s*(.*?)"
         rf"(?=^\s*(?:{end_pattern})\s*$|\Z)",
         text,
     )
-    return match.group(1).strip() if match else ""
 
+    if not match:
+        return ""
+
+    value = match.group(1).strip()
+
+    # Remove the leading "Answer:" if present.
+    value = re.sub(r"(?im)^Answer:\s*", "", value)
+
+    return value.strip()
 
 def format_rca_for_review(generated_text: str) -> str:
-    headings = tuple([f"Why {index}" for index in range(1, 6)])
-    root_cause = section_text(generated_text, "Root Cause", headings)
-    sections = [f"Root Cause\n\n{root_cause}"]
 
-    for index in range(1, 6):
-        heading = f"Why {index}"
-        following = tuple(f"Why {item}" for item in range(index + 1, 6))
-        value = section_text(generated_text, heading, following)
-        sections.append(f"{heading}\n\n{value}")
+    sections = {}
 
-    return "\n\n".join(sections).strip()
+    current = None
+    buffer = []
 
+    for line in generated_text.splitlines():
+
+        line = line.strip()
+
+        if not line:
+            continue
+
+        if line.startswith("Why "):
+            if current:
+                sections[current] = "\n".join(buffer).strip()
+
+            current = line.split(":")[0]  # Why 1, Why 2...
+            buffer = []
+
+            # keep the question after the colon
+            if ":" in line:
+                question = line.split(":", 1)[1].strip()
+                if question:
+                    buffer.append(question)
+
+            continue
+
+        if line.startswith("Root Cause Summary"):
+            if current:
+                sections[current] = "\n".join(buffer).strip()
+
+            current = "Root Cause"
+            buffer = []
+            continue
+
+        if line.startswith("Answer:"):
+            line = line.replace("Answer:", "", 1).strip()
+
+        buffer.append(line)
+
+    if current:
+        sections[current] = "\n".join(buffer).strip()
+
+    result = []
+
+    result.append(f"Root Cause\n\n{sections.get('Root Cause','')}")
+
+    for i in range(1, 6):
+        result.append(f"Why {i}\n\n{sections.get(f'Why {i}','')}")
+
+    return "\n\n".join(result)
 
 def format_capa_for_review(generated_text: str) -> str:
-    headings = (
-        "Corrective Action",
-        "Preventive Action",
-        "Ownership",
-        "Monitoring",
-        "Lessons Learned",
-        "Reviewer Feedback",
-    )
-    sections = []
-    for index, heading in enumerate(headings[:-1]):
-        value = section_text(generated_text, heading, headings[index + 1 :])
-        if heading == "Lessons Learned" or value:
-            sections.append(f"{heading}\n\n{value}")
-    return "\n\n".join(sections).strip()
 
+    sections = {}
 
+    current = None
+    buffer = []
+
+    for line in generated_text.splitlines():
+
+        line = line.strip()
+
+        if not line:
+            continue
+
+        if line.startswith("Corrective Action"):
+            if current:
+                sections[current] = "\n".join(buffer).strip()
+            current = "Corrective Action"
+            buffer = []
+            continue
+
+        if line.startswith("Corrective Actions"):
+            if current:
+                sections[current] = "\n".join(buffer).strip()
+            current = "Corrective Action"
+            buffer = []
+            continue
+
+        if line.startswith("Preventive Action"):
+            if current:
+                sections[current] = "\n".join(buffer).strip()
+            current = "Preventive Action"
+            buffer = []
+            continue
+
+        if line.startswith("Preventive Actions"):
+            if current:
+                sections[current] = "\n".join(buffer).strip()
+            current = "Preventive Action"
+            buffer = []
+            continue
+
+        if line.startswith("Lessons Learned"):
+            if current:
+                sections[current] = "\n".join(buffer).strip()
+            current = "Lessons Learned"
+            buffer = []
+            continue
+
+        buffer.append(line)
+
+    if current:
+        sections[current] = "\n".join(buffer).strip()
+
+    return f"""Corrective Action
+
+{sections.get("Corrective Action", "")}
+
+Preventive Action
+
+{sections.get("Preventive Action", "")}
+
+Lessons Learned
+
+{sections.get("Lessons Learned", "")}
+""".strip()
 def invalidate_rca() -> None:
     st.session_state.rca_validated = False
     st.session_state.rca_approved = False
@@ -357,7 +468,26 @@ def incident_intake() -> None:
         "Investigation Timeline\n"
         f"{st.session_state.timeline}"
     )
-    rca = format_rca_for_review(generate_rca(incident))
+    from src.inference.rca_inference import generate_rca_from_incident
+    rca = format_rca_for_review(
+        generate_rca_from_incident(
+            problem_description=st.session_state.problem_description,
+            business_impact=st.session_state.business_impact,
+            timeline=st.session_state.timeline,
+        )
+    )
+    raw_rca = generate_rca_from_incident(
+        problem_description=st.session_state.problem_description,
+        business_impact=st.session_state.business_impact,
+        timeline=st.session_state.timeline,
+    )
+
+    print("========== RAW RCA ==========")
+    print(raw_rca)
+    print("=============================")
+
+    rca = format_rca_for_review(raw_rca)
+
     st.session_state.incident_text = incident
     st.session_state.rca_text = rca
     st.session_state.rca_editor = rca
@@ -439,11 +569,14 @@ def rca_review() -> None:
             st.rerun()
 
     if regenerate_clicked:
+        from src.inference.rca_inference import generate_rca_from_incident
         st.session_state.rca_feedback = st.session_state.rca_feedback_input.strip()
         rca = format_rca_for_review(
-            generate_rca(
-                st.session_state.incident_text,
-                st.session_state.rca_feedback,
+            generate_rca_from_incident(
+                problem_description=st.session_state.problem_description,
+                business_impact=st.session_state.business_impact,
+                timeline=st.session_state.timeline,
+                feedback=st.session_state.rca_feedback,
             )
         )
         invalidate_rca()
@@ -453,8 +586,7 @@ def rca_review() -> None:
     if approve_clicked:
         st.session_state.rca_approved = True
         capa = format_capa_for_review(
-            generate_capa(
-                st.session_state.incident_text,
+            generate_capa_from_rca(
                 st.session_state.rca_text,
             )
         )
@@ -549,8 +681,7 @@ def capa_review() -> None:
     if regenerate_clicked:
         st.session_state.capa_feedback = st.session_state.capa_feedback_input.strip()
         capa = format_capa_for_review(
-            generate_capa(
-                st.session_state.incident_text,
+            generate_capa_from_rca(
                 st.session_state.rca_text,
                 st.session_state.capa_feedback,
             )

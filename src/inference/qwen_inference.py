@@ -1,21 +1,23 @@
+import gc
+import torch
 from unsloth import FastLanguageModel
 
 MODEL_NAME = "unsloth/Qwen2.5-3B-Instruct-bnb-4bit"
-ADAPTER_PATH = "qwen_rca_adapter"
+ADAPTER_PATH = "/content/it-rca-capa-framework/IT_RCA_CAPA/qwen_rca_adapter"
 
+# Global model objects
 model = None
 tokenizer = None
 
 
-def load_model():
+def load_qwen():
+    global model, tokenizer
 
-    global model
-    global tokenizer
-
+    # Already loaded
     if model is not None:
-        return model, tokenizer
+        return
 
-    print("Loading Qwen model...")
+    print("Loading Qwen...")
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=MODEL_NAME,
@@ -27,19 +29,40 @@ def load_model():
 
     FastLanguageModel.for_inference(model)
 
-    print("Qwen loaded.")
-
-    return model, tokenizer
+    print("Qwen Loaded")
 
 
-def generate_rca(user_prompt):
+def unload_qwen():
+    global model, tokenizer
 
-    model, tokenizer = load_model()
+    if model is None:
+        return
+
+    print("Unloading Qwen...")
+
+    del model
+    del tokenizer
+
+    model = None
+    tokenizer = None
+
+    gc.collect()
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+
+    print("Qwen Unloaded")
+
+
+def generate_rca(prompt):
+
+    load_qwen()
 
     messages = [
         {
             "role": "user",
-            "content": user_prompt
+            "content": prompt,
         }
     ]
 
@@ -65,5 +88,8 @@ def generate_rca(user_prompt):
         outputs[0][inputs["input_ids"].shape[1]:],
         skip_special_tokens=True,
     )
+
+    # Free GPU memory immediately after generation
+    unload_qwen()
 
     return response

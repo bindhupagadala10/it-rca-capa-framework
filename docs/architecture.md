@@ -276,3 +276,25 @@ Target Future Dataset Size:
 Target Outcome:
 
 Automated generation of enterprise-grade RCA and CAPA documentation with human review and approval workflows.
+
+Streamlit UI
+│
+├── Input Validator
+│
+├── RCA Inference Wrapper
+│      │
+│      └── Qwen Adapter
+│
+├── RCA Validator
+│
+├── CAPA Inference Wrapper
+│      │
+│      └── Mistral Adapter
+│
+├── CAPA Validator
+│
+└── DOCX Generator
+
+Models are lazily loaded.
+Models are unloaded immediately after inference.
+Only one model occupies GPU memory at a time.
