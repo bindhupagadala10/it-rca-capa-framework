@@ -423,11 +423,14 @@ def incident_intake(is_busy: bool) -> None:
             load_rca_model_wrapper()
             start_time = datetime.now()
             raw_rca = generate_rca(incident)
+           
             st.session_state.rca_raw = raw_rca
             rca = format_rca_for_review(raw_rca)
+            
             st.session_state.rca_generation_time = (datetime.now() - start_time).total_seconds()
             
             st.session_state.rca_text = rca
+            
             st.session_state.rca_editor = rca
             st.session_state.rca_generated = True
             st.session_state.rca_generating = False

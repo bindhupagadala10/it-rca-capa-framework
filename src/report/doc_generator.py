@@ -34,37 +34,34 @@ def _extract_section(
     )
     return match.group(1).strip() if match else ""
 
-def _parse_why_section(section: str) -> tuple[str, str]:
+def _parse_why_section(section):
+
+    section = section.strip()
+
+    if not section:
+        return "", ""
+
+    lines = [x.strip() for x in section.splitlines() if x.strip()]
 
     question = ""
     answer = ""
 
-    lines = [line.strip() for line in section.splitlines() if line.strip()]
+    for i, line in enumerate(lines):
 
-    if not lines:
-        return "", ""
+        if line.lower().startswith("answer:"):
 
-    # First non-empty line = question
-    question = lines[0]
+            answer = line[7:].strip()
 
-    # Remaining lines after "Answer:"
-    answer_lines = []
+            if i + 1 < len(lines):
+                answer += "\n" + "\n".join(lines[i + 1:])
 
-    answer_started = False
+            break
 
-    for line in lines[1:]:
+        elif not question:
 
-        if line.lower().startswith("answer"):
-            answer_started = True
-            continue
-
-        if answer_started:
-            answer_lines.append(line)
-
-    answer = "\n".join(answer_lines)
+            question = line
 
     return question, answer
-
 def _parse_incident(incident_text: str) -> dict[str, str]:
     headings = ("Problem Description", "Business Impact", "Investigation Timeline")
     return {

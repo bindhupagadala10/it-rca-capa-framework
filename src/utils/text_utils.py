@@ -77,15 +77,25 @@ def normalize_rca(text: str) -> str:
         
     result = "\n".join(processed_lines)
     
-    canonical_rca_headings = ["Root Cause", "Why 1", "Why 2", "Why 3", "Why 4", "Why 5"]
-    for heading in canonical_rca_headings:
-        pattern = rf'(?:\s*\n)+{re.escape(heading)}(?:\s*\n)+'
-        result = re.sub(pattern, f'\n\n{heading}\n\n', result)
-        
-        result = re.sub(rf'^{re.escape(heading)}(?:\s*\n)+', f'{heading}\n\n', result)
-        result = re.sub(rf'(?:\s*\n)+{re.escape(heading)}$', f'\n\n{heading}', result)
-        
+    # Normalize spacing only
     result = re.sub(r'\n{3,}', '\n\n', result)
+
+    # Ensure headings start on a new line
+    for i in range(1, 6):
+        result = re.sub(
+            rf'\s*Why {i}\s*',
+            f'\n\nWhy {i}\n',
+            result,
+        )
+
+    result = re.sub(
+        r'\s*Root Cause\s*',
+        '\n\nRoot Cause\n',
+        result,
+    )
+
+    result = re.sub(r'\n{3,}', '\n\n', result)
+
     return result.strip()
 
 
@@ -141,13 +151,6 @@ def normalize_capa(text: str) -> str:
         
     result = "\n".join(processed_lines)
     
-    canonical_capa_headings = ["Corrective Action", "Preventive Action", "Lessons Learned"]
-    for heading in canonical_capa_headings:
-        pattern = rf'(?:\s*\n)+{re.escape(heading)}(?:\s*\n)+'
-        result = re.sub(pattern, f'\n\n{heading}\n\n', result)
-        
-        result = re.sub(rf'^{re.escape(heading)}(?:\s*\n)+', f'{heading}\n\n', result)
-        result = re.sub(rf'(?:\s*\n)+{re.escape(heading)}$', f'\n\n{heading}', result)
-        
     result = re.sub(r'\n{3,}', '\n\n', result)
-    return result.strip()
+
+    return result.strip()
