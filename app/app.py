@@ -13,9 +13,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 # To switch to real model inference, comment/uncomment the lines below:
-#from src.inference.mock_inference import generate_mock_rca as generate_rca, generate_mock_capa as generate_capa
-from src.inference.rca_inference import generate_rca, generate_rca_from_incident
-from src.inference.capa_inference import generate_capa_from_rca
+from src.inference.mock_inference import generate_mock_rca as generate_rca, generate_mock_capa as generate_capa
+# from src.inference.rca_inference import generate_rca; from src.inference.capa_inference import generate_capa
 from src.report.doc_generator import generate_docx
 from src.validators.capa_validator import CAPAValidator
 from src.validators.input_validator import validate_incident_input
@@ -45,13 +44,87 @@ DEFAULTS = {
     "capa_approved": False,
     "pending_rca_editor": None,
     "pending_capa_editor": None,
+    
+    # In-progress/state-update flags
+    "rca_generating": False,
+    "rca_regenerating": False,
+    "rca_validating": False,
+    "capa_generating": False,
+    "capa_regenerating": False,
+    "capa_validating": False,
+    "capa_approved_clicked": False,
+    
+    # Debug/Demo metrics
+    "rca_generation_time": None,
+    "rca_validation_time": None,
+    "capa_generation_time": None,
+    "capa_validation_time": None,
+    "current_loaded_model": "None (GPU Free)",
+    
+    # Caching
+    "docx_data": None,
 }
+
+
+def check_is_mock() -> bool:
+    return generate_rca.__module__.endswith("mock_inference")
+
+
+def load_rca_model_wrapper() -> None:
+    if check_is_mock():
+        st.session_state.current_loaded_model = "Mock Inference Engine"
+    else:
+        st.session_state.current_loaded_model = "Qwen2.5-3B-Instruct (RCA)"
+        try:
+            from src.inference.qwen_inference import load_qwen
+            load_qwen()
+        except Exception as e:
+            print(f"Error loading Qwen: {e}")
+
+
+def unload_rca_model_wrapper() -> None:
+    if check_is_mock():
+        st.session_state.current_loaded_model = "Mock Inference Engine"
+    else:
+        st.session_state.current_loaded_model = "None (GPU Free)"
+        try:
+            from src.inference.qwen_inference import unload_qwen
+            unload_qwen()
+        except Exception as e:
+            print(f"Error unloading Qwen: {e}")
+
+
+def load_capa_model_wrapper() -> None:
+    if check_is_mock():
+        st.session_state.current_loaded_model = "Mock Inference Engine"
+    else:
+        st.session_state.current_loaded_model = "Mistral-7B-Instruct (CAPA)"
+        try:
+            from src.inference.mistral_inference import load_mistral
+            load_mistral()
+        except Exception as e:
+            print(f"Error loading Mistral: {e}")
+
+
+def unload_capa_model_wrapper() -> None:
+    if check_is_mock():
+        st.session_state.current_loaded_model = "Mock Inference Engine"
+    else:
+        st.session_state.current_loaded_model = "None (GPU Free)"
+        try:
+            from src.inference.mistral_inference import unload_mistral
+            unload_mistral()
+        except Exception as e:
+            print(f"Error unloading Mistral: {e}")
 
 
 def initialize_state() -> None:
     for key, value in DEFAULTS.items():
         if key not in st.session_state:
             st.session_state[key] = value.copy() if isinstance(value, list) else value
+    
+    if check_is_mock():
+        st.session_state.current_loaded_model = "Mock Inference Engine"
 
 
 def navigate(page: str) -> None:
@@ -80,163 +153,53 @@ def restore_editor_state() -> None:
 
 
 def section_text(text: str, heading: str, following_headings: tuple[str, ...]) -> str:
-
-    # Accept headings with optional "Summary" and optional colon.
-    heading_pattern = re.escape(heading)
-
-    if heading.lower() == "root cause":
-        heading_pattern = r"Root Cause(?: Summary)?"
-
     if not following_headings:
         match = re.search(
-            rf"(?ims)^\s*{heading_pattern}\s*:?\s*$\s*(.*)\Z",
+            rf"(?ims)^\s*{re.escape(heading)}\s*$\s*(.*)\Z",
             text,
         )
         return match.group(1).strip() if match else ""
 
-    end_pattern = "|".join(
-        re.escape(item).replace(r"\ ", r"\s+") + r"\s*:?"
-        for item in following_headings
-    )
-
+    end_pattern = "|".join(re.escape(item) for item in following_headings)
     match = re.search(
-        rf"(?ims)"
-        rf"^\s*{heading_pattern}\s*:?\s*$"
-        rf"\s*(.*?)"
+        rf"(?ims)^\s*{re.escape(heading)}\s*$\s*(.*?)"
         rf"(?=^\s*(?:{end_pattern})\s*$|\Z)",
         text,
     )
+    return match.group(1).strip() if match else ""
 
-    if not match:
-        return ""
-
-    value = match.group(1).strip()
-
-    # Remove the leading "Answer:" if present.
-    value = re.sub(r"(?im)^Answer:\s*", "", value)
-
-    return value.strip()
 
 def format_rca_for_review(generated_text: str) -> str:
+    headings = tuple([f"Why {index}" for index in range(1, 6)])
+    root_cause = section_text(generated_text, "Root Cause", headings)
+    sections = [f"Root Cause\n\n{root_cause}"]
 
-    sections = {}
+    for index in range(1, 6):
+        heading = f"Why {index}"
+        following = tuple(f"Why {item}" for item in range(index + 1, 6))
+        value = section_text(generated_text, heading, following)
+        sections.append(f"{heading}\n\n{value}")
 
-    current = None
-    buffer = []
+    return "\n\n".join(sections).strip()
 
-    for line in generated_text.splitlines():
-
-        line = line.strip()
-
-        if not line:
-            continue
-
-        if line.startswith("Why "):
-            if current:
-                sections[current] = "\n".join(buffer).strip()
-
-            current = line.split(":")[0]  # Why 1, Why 2...
-            buffer = []
-
-            # keep the question after the colon
-            if ":" in line:
-                question = line.split(":", 1)[1].strip()
-                if question:
-                    buffer.append(question)
-
-            continue
-
-        if line.startswith("Root Cause Summary"):
-            if current:
-                sections[current] = "\n".join(buffer).strip()
-
-            current = "Root Cause"
-            buffer = []
-            continue
-
-        if line.startswith("Answer:"):
-            line = line.replace("Answer:", "", 1).strip()
-
-        buffer.append(line)
-
-    if current:
-        sections[current] = "\n".join(buffer).strip()
-
-    result = []
-
-    result.append(f"Root Cause\n\n{sections.get('Root Cause','')}")
-
-    for i in range(1, 6):
-        result.append(f"Why {i}\n\n{sections.get(f'Why {i}','')}")
-
-    return "\n\n".join(result)
 
 def format_capa_for_review(generated_text: str) -> str:
+    headings = (
+        "Corrective Action",
+        "Preventive Action",
+        "Ownership",
+        "Monitoring",
+        "Lessons Learned",
+        "Reviewer Feedback",
+    )
+    sections = []
+    for index, heading in enumerate(headings[:-1]):
+        value = section_text(generated_text, heading, headings[index + 1 :])
+        if heading == "Lessons Learned" or value:
+            sections.append(f"{heading}\n\n{value}")
+    return "\n\n".join(sections).strip()
 
-    sections = {}
 
-    current = None
-    buffer = []
-
-    for line in generated_text.splitlines():
-
-        line = line.strip()
-
-        if not line:
-            continue
-
-        if line.startswith("Corrective Action"):
-            if current:
-                sections[current] = "\n".join(buffer).strip()
-            current = "Corrective Action"
-            buffer = []
-            continue
-
-        if line.startswith("Corrective Actions"):
-            if current:
-                sections[current] = "\n".join(buffer).strip()
-            current = "Corrective Action"
-            buffer = []
-            continue
-
-        if line.startswith("Preventive Action"):
-            if current:
-                sections[current] = "\n".join(buffer).strip()
-            current = "Preventive Action"
-            buffer = []
-            continue
-
-        if line.startswith("Preventive Actions"):
-            if current:
-                sections[current] = "\n".join(buffer).strip()
-            current = "Preventive Action"
-            buffer = []
-            continue
-
-        if line.startswith("Lessons Learned"):
-            if current:
-                sections[current] = "\n".join(buffer).strip()
-            current = "Lessons Learned"
-            buffer = []
-            continue
-
-        buffer.append(line)
-
-    if current:
-        sections[current] = "\n".join(buffer).strip()
-
-    return f"""Corrective Action
-
-{sections.get("Corrective Action", "")}
-
-Preventive Action
-
-{sections.get("Preventive Action", "")}
-
-Lessons Learned
-
-{sections.get("Lessons Learned", "")}
-""".strip()
 def invalidate_rca() -> None:
     st.session_state.rca_validated = False
     st.session_state.rca_approved = False
@@ -247,23 +210,28 @@ def invalidate_rca() -> None:
     st.session_state.capa_generated = False
     st.session_state.capa_validated = False
     st.session_state.capa_approved = False
+    st.session_state.docx_data = None
 
 
 def invalidate_capa() -> None:
     st.session_state.capa_validated = False
     st.session_state.capa_approved = False
     st.session_state.capa_flags = []
+    st.session_state.docx_data = None
 
 
-def sidebar_status(done: bool, completed: str, pending: str) -> None:
-    if done:
-        st.sidebar.success(completed, icon="✅")
+def render_stage_status(stage_name: str, status: str) -> None:
+    if status == "Completed":
+        st.sidebar.success(f"{stage_name}: Completed", icon="✅")
+    elif status == "Generating":
+        st.sidebar.warning(f"{stage_name}: Generating...", icon="🔄")
     else:
-        st.sidebar.info(pending, icon="⏳")
+        st.sidebar.info(f"{stage_name}: Pending", icon="⏳")
 
 
-def render_sidebar() -> None:
+def render_sidebar(is_busy: bool) -> None:
     st.sidebar.title("Enterprise RCA-CAPA")
+    
     # Check allowed pages based on workflow progress
     allowed_pages = ["Incident Intake"]
     if st.session_state.rca_generated:
@@ -282,6 +250,7 @@ def render_sidebar() -> None:
         "Workflow",
         PAGES,
         index=PAGES.index(st.session_state.current_page),
+        disabled=is_busy,
     )
     
     if selected != st.session_state.current_page:
@@ -291,36 +260,80 @@ def render_sidebar() -> None:
         else:
             st.toast(f"🔒 {selected} is locked. Complete previous steps first.", icon="🔒")
             st.rerun()
+            
+    st.sidebar.divider()
+    
+    # Validation Rules Reference
+    with st.sidebar.expander("Validation Rules Reference"):
+        st.markdown("""
+        **RCA Validation Rules:**
+        * **RCA001**: No unsupported technology references.
+        * **RCA002**: Avoid generic root cause phrases.
+        * **RCA003**: Length must be at least 50 words.
+        * **RCA004**: Must contain a "Root Cause" section.
+        * **RCA005**: Must contain all 5 "Why" levels.
+        * **RCA006**: Strong keyword overlap with incident context.
+        
+        **CAPA Validation Rules:**
+        * **CAPA001**: No unsupported technology references.
+        * **CAPA002**: Must contain monitoring/detection improvements.
+        * **CAPA003**: Must specify an owner or responsible team.
+        * **CAPA004**: Avoid non-actionable statements.
+        * **CAPA005**: Avoid potential boilerplate language.
+        """)
+        
     st.sidebar.divider()
     st.sidebar.subheader("Workflow Progress")
 
-    incident_complete = bool(st.session_state.incident_text.strip())
-    sidebar_status(
-        incident_complete, "Incident Details Completed", "Incident Details Pending"
-    )
-    sidebar_status(
-        st.session_state.rca_generated, "RCA Generated", "RCA Generation Pending"
-    )
-    sidebar_status(
-        st.session_state.rca_validated, "RCA Validated", "RCA Validation Pending"
-    )
-    sidebar_status(
-        st.session_state.rca_approved, "RCA Approved", "RCA Approval Pending"
-    )
-    sidebar_status(
-        st.session_state.capa_generated, "CAPA Generated", "CAPA Generation Pending"
-    )
-    sidebar_status(
-        st.session_state.capa_validated, "CAPA Validated", "CAPA Validation Pending"
-    )
-    sidebar_status(
-        st.session_state.capa_approved, "CAPA Approved", "CAPA Approval Pending"
-    )
-    sidebar_status(
-        st.session_state.rca_approved and st.session_state.capa_approved,
-        "Report Ready for DOCX Generation",
-        "DOCX Generation Pending",
-    )
+    # 1. Incident Details status
+    incident_status = "Completed" if bool(st.session_state.incident_text.strip()) else "Pending"
+    render_stage_status("Incident Details", incident_status)
+    
+    # 2. RCA status
+    if st.session_state.rca_approved:
+        rca_status = "Completed"
+    elif st.session_state.rca_generating or st.session_state.rca_regenerating or st.session_state.rca_validating:
+        rca_status = "Generating"
+    else:
+        rca_status = "Pending"
+    render_stage_status("RCA", rca_status)
+    
+    # 3. CAPA status
+    if st.session_state.capa_approved:
+        capa_status = "Completed"
+    elif st.session_state.capa_generating or st.session_state.capa_regenerating or st.session_state.capa_validating or st.session_state.capa_approved_clicked:
+        capa_status = "Generating"
+    else:
+        capa_status = "Pending"
+    render_stage_status("CAPA", capa_status)
+    
+    # 4. Report status
+    report_status = "Completed" if (st.session_state.rca_approved and st.session_state.capa_approved) else "Pending"
+    render_stage_status("Report", report_status)
+
+    # System Metrics Display
+    st.sidebar.divider()
+    st.sidebar.subheader("System Metrics")
+    st.sidebar.markdown(f"**Loaded Model:** `{st.session_state.current_loaded_model}`")
+    
+    if st.session_state.rca_generation_time is not None:
+        st.sidebar.markdown(f"⏱️ RCA Gen: `{st.session_state.rca_generation_time:.2f}s`")
+    if st.session_state.rca_validation_time is not None:
+        st.sidebar.markdown(f"⏱️ RCA Val: `{st.session_state.rca_validation_time:.2f}s`")
+    if st.session_state.capa_generation_time is not None:
+        st.sidebar.markdown(f"⏱️ CAPA Gen: `{st.session_state.capa_generation_time:.2f}s`")
+    if st.session_state.capa_validation_time is not None:
+        st.sidebar.markdown(f"⏱️ CAPA Val: `{st.session_state.capa_validation_time:.2f}s`")
+
+    # Start New Incident (Session Reset)
+    st.sidebar.divider()
+    if st.sidebar.button("Start New Incident", type="secondary", use_container_width=True, disabled=is_busy):
+        unload_rca_model_wrapper()
+        unload_capa_model_wrapper()
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        initialize_state()
+        st.rerun()
 
 
 def render_header() -> None:
@@ -336,39 +349,96 @@ def render_header() -> None:
     )
 
 
+def render_validation_summary(flags: list[dict], total_rules: int) -> None:
+    critical_count = sum(1 for f in flags if str(f.get("severity", "")).upper() == "HIGH")
+    warning_count = sum(1 for f in flags if str(f.get("severity", "")).upper() in ("MEDIUM", "LOW"))
+    passed_count = total_rules - (critical_count + warning_count)
+    
+    st.markdown("#### Validation Summary")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Rules Checked", total_rules)
+    col2.metric("Passed", passed_count)
+    col3.metric("Warnings", warning_count)
+    col4.metric("Critical", critical_count)
+
+
 def render_flags(flags: list[dict], artifact: str) -> None:
-    st.subheader("Validation Results")
+    total_rules = 6 if artifact == "RCA" else 5
+    st.markdown("---")
+    render_validation_summary(flags, total_rules)
+    st.markdown("---")
+    
+    st.subheader("Detailed Findings")
     if not flags:
+        st.markdown("### 🟢 PASS")
         st.success(f"{artifact} validation passed with no findings.", icon="✅")
         return
 
     st.error(
         f"{artifact} validation returned {len(flags)} finding(s). "
-        "Resolve all findings and validate again before approval."
+        "Resolve findings and validate again before approval."
     )
     for flag in flags:
         severity = str(flag.get("severity", "UNKNOWN")).upper()
+        badge = {
+            "HIGH": "🔴 HIGH",
+            "MEDIUM": "🟠 MEDIUM",
+            "LOW": "🟡 LOW",
+        }.get(severity, f"⚪ {severity}")
+        
         css_class = {
             "HIGH": "finding-high",
             "MEDIUM": "finding-medium",
             "LOW": "finding-low",
         }.get(severity, "finding-medium")
+        
         st.markdown(
             f"""
             <div class="finding-card {css_class}">
-              <div class="finding-heading">
-                {escape(str(flag.get("id", "VALIDATION")))} · {escape(severity)}
+              <div class="finding-heading" style="display: flex; justify-content: space-between;">
+                <span>{escape(str(flag.get("id", "VALIDATION")))}</span>
+                <span style="font-weight: bold;">{badge}</span>
               </div>
-              <div>{escape(str(flag.get("message", "Validation finding")))}</div>
+              <div style="margin-top: 5px;">{escape(str(flag.get("message", "Validation finding")))}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
 
-def incident_intake() -> None:
+def incident_intake(is_busy: bool) -> None:
     st.header("Incident Intake")
     st.caption("Capture the verified incident facts used to generate the RCA.")
+
+    if st.session_state.get("rca_generating", False):
+        st.info("Generating Root Cause Analysis... Please wait.")
+        with st.spinner("Generating RCA using Qwen model..."):
+            incident = (
+                "Problem Description\n"
+                f"{st.session_state.problem_description_input.strip()}\n\n"
+                "Business Impact\n"
+                f"{st.session_state.business_impact_input.strip()}\n\n"
+                "Investigation Timeline\n"
+                f"{st.session_state.timeline_input.strip()}"
+            )
+            st.session_state.problem_description = st.session_state.problem_description_input.strip()
+            st.session_state.business_impact = st.session_state.business_impact_input.strip()
+            st.session_state.timeline = st.session_state.timeline_input.strip()
+            st.session_state.incident_text = incident
+            
+            # Record generation time and load info
+            load_rca_model_wrapper()
+            start_time = datetime.now()
+            rca = format_rca_for_review(generate_rca(incident))
+            st.session_state.rca_generation_time = (datetime.now() - start_time).total_seconds()
+            
+            st.session_state.rca_text = rca
+            st.session_state.rca_editor = rca
+            st.session_state.rca_generated = True
+            st.session_state.rca_generating = False
+            invalidate_rca()
+            navigate("RCA Review")
+        st.rerun()
 
     if st.session_state.rca_generated:
         st.info("Incident details are locked because RCA generation has started.")
@@ -391,7 +461,7 @@ def incident_intake() -> None:
                 height=180,
                 disabled=True,
             )
-        if st.button("Continue to RCA Review", type="primary", use_container_width=True):
+        if st.button("Continue to RCA Review", type="primary", use_container_width=True, disabled=is_busy):
             navigate("RCA Review")
             st.rerun()
         return
@@ -415,6 +485,7 @@ def incident_intake() -> None:
                     "Describe the technical symptoms, affected service, observed "
                     "behavior, and relevant environmental details."
                 ),
+                disabled=is_busy,
             )
         with right:
             st.info(
@@ -429,6 +500,7 @@ def incident_intake() -> None:
                 "Describe affected users or services, duration, operational impact, "
                 "and any SLA or compliance exposure."
             ),
+            disabled=is_busy,
         )
         st.text_area(
             "Investigation Timeline *",
@@ -438,74 +510,89 @@ def incident_intake() -> None:
                 "09:00 - Alert received\n09:05 - Incident bridge opened\n"
                 "09:20 - Technical team engaged\n09:45 - Service restored"
             ),
+            disabled=is_busy,
         )
 
-    if not st.button("Generate RCA", type="primary", use_container_width=True):
-        return
-
-    errors = validate_incident_input(
-        st.session_state.problem_description_input,
-        st.session_state.business_impact_input,
-        st.session_state.timeline_input,
-    )
-    if errors:
-        st.error("Correct the following validation errors before continuing:")
-        for error in errors:
-            st.error(error, icon="⚠️")
-        return
-
-    st.session_state.problem_description = (
-        st.session_state.problem_description_input.strip()
-    )
-    st.session_state.business_impact = st.session_state.business_impact_input.strip()
-    st.session_state.timeline = st.session_state.timeline_input.strip()
-
-    incident = (
-        "Problem Description\n"
-        f"{st.session_state.problem_description}\n\n"
-        "Business Impact\n"
-        f"{st.session_state.business_impact}\n\n"
-        "Investigation Timeline\n"
-        f"{st.session_state.timeline}"
-    )
-    from src.inference.rca_inference import generate_rca_from_incident
-    rca = format_rca_for_review(
-        generate_rca_from_incident(
-            problem_description=st.session_state.problem_description,
-            business_impact=st.session_state.business_impact,
-            timeline=st.session_state.timeline,
+    if st.button("Generate RCA", type="primary", use_container_width=True, disabled=is_busy):
+        errors = validate_incident_input(
+            st.session_state.problem_description_input,
+            st.session_state.business_impact_input,
+            st.session_state.timeline_input,
         )
-    )
-    raw_rca = generate_rca_from_incident(
-        problem_description=st.session_state.problem_description,
-        business_impact=st.session_state.business_impact,
-        timeline=st.session_state.timeline,
-    )
-
-    print("========== RAW RCA ==========")
-    print(raw_rca)
-    print("=============================")
-
-    rca = format_rca_for_review(raw_rca)
-
-    st.session_state.incident_text = incident
-    st.session_state.rca_text = rca
-    st.session_state.rca_editor = rca
-    st.session_state.rca_generated = True
-    invalidate_rca()
-    navigate("RCA Review")
-    st.rerun()
+        if errors:
+            st.error("Correct the following validation errors before continuing:")
+            for error in errors:
+                st.error(error, icon="⚠️")
+        else:
+            # Immediate status update before generation begins
+            st.session_state.rca_generating = True
+            st.rerun()
 
 
-def rca_review() -> None:
+def rca_review(is_busy: bool) -> None:
     st.header("RCA Review")
     st.caption("Review, validate, refine, and approve the Root Cause Analysis.")
     if not st.session_state.rca_generated:
         st.warning("Generate an RCA from Incident Intake before starting RCA review.")
-        if st.button("Go to Incident Intake", type="primary"):
+        if st.button("Go to Incident Intake", type="primary", disabled=is_busy):
             navigate("Incident Intake")
             st.rerun()
         return
+
+    # Execution Blocks for Spinner / State update
+    if st.session_state.get("rca_regenerating", False):
+        st.info("Regenerating Root Cause Analysis... Please wait.")
+        with st.spinner("Regenerating RCA using Qwen model..."):
+            feedback_val = st.session_state.get("rca_feedback", "").strip()
+            start_time = datetime.now()
+            rca = format_rca_for_review(
+                generate_rca(
+                    st.session_state.incident_text,
+                    feedback_val,
+                )
+            )
+            st.session_state.rca_generation_time = (datetime.now() - start_time).total_seconds()
+            invalidate_rca()
+            st.session_state.pending_rca_editor = rca
+            st.session_state.rca_regenerating = False
+        st.rerun()
+
+    if st.session_state.get("rca_validating", False):
+        st.info("Validating Root Cause Analysis... Please wait.")
+        with st.spinner("Validating RCA..."):
+            start_time = datetime.now()
+            st.session_state.rca_flags = validate_rca(
+                st.session_state.incident_text, st.session_state.rca_text
+            )
+            st.session_state.rca_validation_time = (datetime.now() - start_time).total_seconds()
+            st.session_state.rca_validated = True
+            st.session_state.rca_validating = False
+        st.rerun()
+
+    if st.session_state.get("capa_generating", False):
+        st.info("Unloading Qwen and generating CAPA... Please wait.")
+        with st.spinner("Switching AI models..."):
+            unload_rca_model_wrapper()
+            load_capa_model_wrapper()
+
+        with st.spinner("Generating CAPA using Mistral model..."):
+            start_time = datetime.now()
+            capa = format_capa_for_review(
+                generate_capa(
+                    st.session_state.incident_text,
+                    st.session_state.rca_text,
+                )
+            )
+            st.session_state.capa_generation_time = (datetime.now() - start_time).total_seconds()
+            st.session_state.capa_text = capa
+            st.session_state.capa_editor = capa
+            st.session_state.capa_generated = True
+            st.session_state.capa_validated = False
+            st.session_state.capa_approved = False
+            st.session_state.capa_flags = []
+            st.session_state.capa_generating = False
+            navigate("CAPA Review")
+        st.rerun()
 
     with st.expander("Incident Context"):
         st.text(st.session_state.incident_text)
@@ -520,7 +607,7 @@ def rca_review() -> None:
         )
         if st.session_state.rca_validated:
             render_flags(st.session_state.rca_flags, "RCA")
-        if st.button("Continue to CAPA Review", type="primary", use_container_width=True):
+        if st.button("Continue to CAPA Review", type="primary", use_container_width=True, disabled=is_busy):
             navigate("CAPA Review")
             st.rerun()
         return
@@ -530,14 +617,15 @@ def rca_review() -> None:
         key="rca_editor",
         height=430,
         on_change=invalidate_rca,
+        disabled=is_busy,
     )
     st.session_state.rca_text = st.session_state.rca_editor.strip()
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        validate_clicked = st.button("Validate RCA", use_container_width=True)
+        validate_clicked = st.button("Validate RCA", use_container_width=True, disabled=is_busy)
     with col2:
-        regenerate_clicked = st.button("Regenerate RCA", use_container_width=True)
+        regenerate_clicked = st.button("Regenerate RCA", use_container_width=True, disabled=is_busy)
     with col3:
         approve_clicked = st.button(
             "Approve RCA",
@@ -545,77 +633,93 @@ def rca_review() -> None:
             disabled=not (
                 st.session_state.rca_validated
                 and bool(st.session_state.rca_text)
-            ),
+            ) or is_busy,
             use_container_width=True,
         )
 
-    if "rca_feedback_input" not in st.session_state:
-        st.session_state.rca_feedback_input = st.session_state.rca_feedback
     st.text_area(
         "Reviewer Feedback (Optional)",
-        key="rca_feedback_input",
+        key="rca_feedback",
         height=120,
         placeholder="Provide precise guidance for RCA regeneration.",
+        disabled=is_busy,
     )
 
     if validate_clicked:
         if not st.session_state.rca_text:
             st.error("RCA content cannot be empty.")
         else:
-            st.session_state.rca_flags = validate_rca(
-                st.session_state.incident_text, st.session_state.rca_text
-            )
-            st.session_state.rca_validated = True
+            st.session_state.rca_validating = True
             st.rerun()
 
     if regenerate_clicked:
-        from src.inference.rca_inference import generate_rca_from_incident
-        st.session_state.rca_feedback = st.session_state.rca_feedback_input.strip()
-        rca = format_rca_for_review(
-            generate_rca_from_incident(
-                problem_description=st.session_state.problem_description,
-                business_impact=st.session_state.business_impact,
-                timeline=st.session_state.timeline,
-                feedback=st.session_state.rca_feedback,
-            )
-        )
-        invalidate_rca()
-        st.session_state.pending_rca_editor = rca
+        st.session_state.rca_regenerating = True
         st.rerun()
-
     if approve_clicked:
+
+        st.session_state.rca_text = st.session_state.rca_editor.strip()
+
         st.session_state.rca_approved = True
-        capa = format_capa_for_review(
-            generate_capa_from_rca(
-                st.session_state.rca_text,
-            )
-        )
-        st.session_state.capa_text = capa
-        st.session_state.capa_editor = capa
-        st.session_state.capa_generated = True
-        st.session_state.capa_validated = False
-        st.session_state.capa_approved = False
-        st.session_state.capa_flags = []
-        navigate("CAPA Review")
+        st.session_state.capa_generating = True
+
         st.rerun()
 
     if st.session_state.rca_validated:
-        st.divider()
         render_flags(st.session_state.rca_flags, "RCA")
 
 
-def capa_review() -> None:
+def capa_review(is_busy: bool) -> None:
     st.header("CAPA Review")
     st.caption("Review, validate, refine, and approve the action plan.")
     if not st.session_state.rca_approved:
         st.warning("Approve the RCA before starting CAPA review.")
-        if st.button("Go to RCA Review", type="primary"):
+        if st.button("Go to RCA Review", type="primary", disabled=is_busy):
             navigate("RCA Review")
             st.rerun()
         return
     if not st.session_state.capa_generated:
         st.warning("CAPA content has not been generated.")
         return
+
+    # Execution Blocks for Spinner / State update
+    if st.session_state.get("capa_regenerating", False):
+        st.info("Regenerating CAPA... Please wait.")
+        with st.spinner("Regenerating CAPA using Mistral model..."):
+            feedback_val = st.session_state.get("capa_feedback", "").strip()
+            start_time = datetime.now()
+            capa = format_capa_for_review(
+                generate_capa(
+                    st.session_state.incident_text,
+                    st.session_state.rca_text,
+                    feedback_val,
+                )
+            )
+            st.session_state.capa_generation_time = (datetime.now() - start_time).total_seconds()
+            invalidate_capa()
+            st.session_state.pending_capa_editor = capa
+            st.session_state.capa_regenerating = False
+        st.rerun()
+
+    if st.session_state.get("capa_validating", False):
+        st.info("Validating CAPA... Please wait.")
+        with st.spinner("Validating CAPA..."):
+            start_time = datetime.now()
+            st.session_state.capa_flags = CAPAValidator().validate(
+                st.session_state.incident_text, st.session_state.capa_text
+            )
+            st.session_state.capa_validation_time = (datetime.now() - start_time).total_seconds()
+            st.session_state.capa_validated = True
+            st.session_state.capa_validating = False
+        st.rerun()
+
+    if st.session_state.get("capa_approved_clicked", False):
+        st.info("Unloading Mistral model... Please wait.")
+        with st.spinner("Unloading Mistral model from GPU..."):
+            unload_capa_model_wrapper()
+            st.session_state.capa_approved = True
+            st.session_state.capa_approved_clicked = False
+            navigate("Final Report")
+        st.rerun()
 
     with st.expander("Approved RCA"):
         st.text(st.session_state.rca_text)
@@ -630,7 +734,7 @@ def capa_review() -> None:
         )
         if st.session_state.capa_validated:
             render_flags(st.session_state.capa_flags, "CAPA")
-        if st.button("Continue to Final Report", type="primary", use_container_width=True):
+        if st.button("Continue to Final Report", type="primary", use_container_width=True, disabled=is_busy):
             navigate("Final Report")
             st.rerun()
         return
@@ -640,14 +744,15 @@ def capa_review() -> None:
         key="capa_editor",
         height=430,
         on_change=invalidate_capa,
+        disabled=is_busy,
     )
     st.session_state.capa_text = st.session_state.capa_editor.strip()
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        validate_clicked = st.button("Validate CAPA", use_container_width=True)
+        validate_clicked = st.button("Validate CAPA", use_container_width=True, disabled=is_busy)
     with col2:
-        regenerate_clicked = st.button("Regenerate CAPA", use_container_width=True)
+        regenerate_clicked = st.button("Regenerate CAPA", use_container_width=True, disabled=is_busy)
     with col3:
         approve_clicked = st.button(
             "Approve CAPA",
@@ -655,52 +760,42 @@ def capa_review() -> None:
             disabled=not (
                 st.session_state.capa_validated
                 and bool(st.session_state.capa_text)
-            ),
+            ) or is_busy,
             use_container_width=True,
         )
 
-    if "capa_feedback_input" not in st.session_state:
-        st.session_state.capa_feedback_input = st.session_state.capa_feedback
     st.text_area(
         "Reviewer Feedback (Optional)",
-        key="capa_feedback_input",
+        key="capa_feedback",
         height=120,
         placeholder="Provide precise guidance for CAPA regeneration.",
+        disabled=is_busy,
     )
 
     if validate_clicked:
         if not st.session_state.capa_text:
             st.error("CAPA content cannot be empty.")
         else:
-            st.session_state.capa_flags = CAPAValidator().validate(
-                st.session_state.incident_text, st.session_state.capa_text
-            )
-            st.session_state.capa_validated = True
+            st.session_state.capa_validating = True
             st.rerun()
 
     if regenerate_clicked:
-        st.session_state.capa_feedback = st.session_state.capa_feedback_input.strip()
-        capa = format_capa_for_review(
-            generate_capa_from_rca(
-                st.session_state.rca_text,
-                st.session_state.capa_feedback,
-            )
-        )
-        invalidate_capa()
-        st.session_state.pending_capa_editor = capa
+        st.session_state.capa_regenerating = True
         st.rerun()
 
     if approve_clicked:
-        st.session_state.capa_approved = True
-        navigate("Final Report")
-        st.rerun()
+
+        st.session_state.capa_text = st.session_state.capa_editor.strip()
+
+        st.session_state.capa_approved_clicked = True
+
+        st.rerun()    
 
     if st.session_state.capa_validated:
-        st.divider()
         render_flags(st.session_state.capa_flags, "CAPA")
 
 
-def final_report() -> None:
+def final_report(is_busy: bool) -> None:
     st.header("Final Report")
     st.caption("Review the approved content and generate the controlled DOCX report.")
     if not (st.session_state.rca_approved and st.session_state.capa_approved):
@@ -715,22 +810,27 @@ def final_report() -> None:
         with st.expander(title, expanded=True):
             st.text(content)
 
-    try:
-        document = generate_docx(
-            incident_text=st.session_state.incident_text,
-            rca_text=st.session_state.rca_text,
-            capa_text=st.session_state.capa_text,
-            problem_description=st.session_state.problem_description,
-            business_impact=st.session_state.business_impact,
-            investigation_timeline=st.session_state.timeline,
-        )
-        data = document.getvalue() if isinstance(document, BytesIO) else document
-        if not isinstance(data, bytes):
-            raise TypeError("DOCX generator returned an unsupported response type.")
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 11. DOCX Generation with Spinner
+    if "docx_data" not in st.session_state or st.session_state.docx_data is None:
+        with st.spinner("Generating DOCX report from template..."):
+            try:
+                document = generate_docx(
+                    incident_text=st.session_state.incident_text,
+                    rca_text=st.session_state.rca_text,
+                    capa_text=st.session_state.capa_text,
+                    problem_description=st.session_state.problem_description,
+                    business_impact=st.session_state.business_impact,
+                    investigation_timeline=st.session_state.timeline,
+                )
+                st.session_state.docx_data = document.getvalue() if isinstance(document, BytesIO) else document
+            except Exception as exc:
+                st.error(f"DOCX generation failed: {exc}")
+                st.session_state.docx_data = None
+
+    if st.session_state.docx_data is not None:
         st.download_button(
             "Generate DOCX",
-            data=data,
+            data=st.session_state.docx_data,
             file_name="Generated_Report.docx",
             mime=(
                 "application/vnd.openxmlformats-officedocument."
@@ -738,9 +838,8 @@ def final_report() -> None:
             ),
             type="primary",
             use_container_width=True,
+            disabled=is_busy,
         )
-    except Exception as exc:
-        st.error(f"DOCX generation is unavailable: {exc}")
 
 
 st.set_page_config(
@@ -772,14 +871,26 @@ st.markdown(
 initialize_state()
 restore_editor_state()
 apply_pending_editor_updates()
-render_sidebar()
+
+# Define overall busy status
+is_busy = (
+    st.session_state.get("rca_generating", False)
+    or st.session_state.get("rca_regenerating", False)
+    or st.session_state.get("rca_validating", False)
+    or st.session_state.get("capa_generating", False)
+    or st.session_state.get("capa_regenerating", False)
+    or st.session_state.get("capa_validating", False)
+    or st.session_state.get("capa_approved_clicked", False)
+)
+
+render_sidebar(is_busy)
 render_header()
 
 if st.session_state.current_page == "Incident Intake":
-    incident_intake()
+    incident_intake(is_busy)
 elif st.session_state.current_page == "RCA Review":
-    rca_review()
+    rca_review(is_busy)
 elif st.session_state.current_page == "CAPA Review":
-    capa_review()
+    capa_review(is_busy)
 else:
-    final_report()
+    final_report(is_busy)

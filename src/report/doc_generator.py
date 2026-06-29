@@ -2,7 +2,7 @@ import re
 from io import BytesIO
 from pathlib import Path
 
-from docx import Document
+from docx import Document, section
 
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "Sample.docx"
@@ -34,6 +34,36 @@ def _extract_section(
     )
     return match.group(1).strip() if match else ""
 
+def _parse_why_section(section: str) -> tuple[str, str]:
+
+    question = ""
+    answer = ""
+
+    lines = [line.strip() for line in section.splitlines() if line.strip()]
+
+    if not lines:
+        return "", ""
+
+    # First non-empty line = question
+    question = lines[0]
+
+    # Remaining lines after "Answer:"
+    answer_lines = []
+
+    answer_started = False
+
+    for line in lines[1:]:
+
+        if line.lower().startswith("answer"):
+            answer_started = True
+            continue
+
+        if answer_started:
+            answer_lines.append(line)
+
+    answer = "\n".join(answer_lines)
+
+    return question, answer
 
 def _parse_incident(incident_text: str) -> dict[str, str]:
     headings = ("Problem Description", "Business Impact", "Investigation Timeline")
@@ -150,9 +180,23 @@ def _populate_template(
     why_headings = tuple(f"Why {index}" for index in range(1, 6))
     for index, row in enumerate(why_table.rows[1:], start=1):
         following = tuple(f"Why {item}" for item in range(index + 1, 6))
-        answer = _extract_section(rca_text, f"Why {index}", following)
-        _replace_cell_text(row.cells[0], f"{index}. Why?")
-        _replace_cell_text(row.cells[1], answer)
+        section = _extract_section(
+            rca_text,
+            f"Why {index}",
+            following,
+        )
+
+        question, answer = _parse_why_section(section)
+
+        _replace_cell_text(
+            row.cells[0],
+            question,
+        )
+
+        _replace_cell_text(
+            row.cells[1],
+            answer,
+        )
 
     root_cause_table = document.tables[5]
     _clear_table_body(root_cause_table)

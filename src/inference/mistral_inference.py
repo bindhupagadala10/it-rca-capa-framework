@@ -92,6 +92,4 @@ def generate_capa(prompt):
         skip_special_tokens=True,
     )
 
-    unload_mistral()
-
     return response

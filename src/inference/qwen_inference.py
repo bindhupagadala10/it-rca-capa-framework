@@ -89,7 +89,4 @@ def generate_rca(prompt):
         skip_special_tokens=True,
     )
 
-    # Free GPU memory immediately after generation
-    unload_qwen()
-
     return response
