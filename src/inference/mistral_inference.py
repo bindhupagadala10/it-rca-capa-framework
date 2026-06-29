@@ -1,10 +1,11 @@
 import gc
-import torch
-from unsloth import FastLanguageModel
+import os
 
 MODEL_NAME = "unsloth/mistral-7b-instruct-v0.3-bnb-4bit"
 
-ADAPTER_PATH = "/content/it-rca-capa-framework/IT_RCA_CAPA/mistral_capa_adapter/emergency_mistral_epoch1"
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
+ADAPTER_PATH = os.path.join(PROJECT_ROOT, "models", "emergency_mistral_epoch1")
 
 model = None
 tokenizer = None
@@ -18,6 +19,8 @@ def load_mistral():
         return
 
     print("Loading Mistral...")
+
+    from unsloth import FastLanguageModel
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=MODEL_NAME,
@@ -49,9 +52,13 @@ def unload_mistral():
 
     gc.collect()
 
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except ImportError:
+        pass
 
     print("Mistral Unloaded")
 
@@ -78,6 +85,7 @@ def generate_capa(prompt):
         return_tensors="pt",
     ).to("cuda")
 
+    import torch
     with torch.inference_mode():
 
         outputs = model.generate(

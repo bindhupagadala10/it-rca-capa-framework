@@ -13,12 +13,13 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 # To switch to real model inference, comment/uncomment the lines below:
-from src.inference.mock_inference import generate_mock_rca as generate_rca, generate_mock_capa as generate_capa
-# from src.inference.rca_inference import generate_rca; from src.inference.capa_inference import generate_capa
+# from src.inference.mock_inference import generate_mock_rca as generate_rca, generate_mock_capa as generate_capa
+from src.inference.rca_inference import generate_rca; from src.inference.capa_inference import generate_capa
 from src.report.doc_generator import generate_docx
 from src.validators.capa_validator import CAPAValidator
 from src.validators.input_validator import validate_incident_input
 from src.validators.rca_validator import validate_rca
+from src.utils.text_utils import normalize_rca, normalize_capa
 
 
 PAGES = ("Incident Intake", "RCA Review", "CAPA Review", "Final Report")
@@ -44,6 +45,8 @@ DEFAULTS = {
     "capa_approved": False,
     "pending_rca_editor": None,
     "pending_capa_editor": None,
+    "rca_raw": "",
+    "capa_raw": "",
     
     # In-progress/state-update flags
     "rca_generating": False,
@@ -152,53 +155,43 @@ def restore_editor_state() -> None:
         st.session_state.capa_editor = st.session_state.capa_text
 
 
-def section_text(text: str, heading: str, following_headings: tuple[str, ...]) -> str:
+def section_text(
+    text: str,
+    heading: str,
+    following_headings: tuple[str, ...],
+) -> str:
+
+    heading_pattern = rf"{re.escape(heading)}\s*:?"
+
     if not following_headings:
+
         match = re.search(
-            rf"(?ims)^\s*{re.escape(heading)}\s*$\s*(.*)\Z",
+            rf"(?ims)^\s*{heading_pattern}\s*$\s*(.*)\Z",
             text,
         )
+
         return match.group(1).strip() if match else ""
 
-    end_pattern = "|".join(re.escape(item) for item in following_headings)
+    end_pattern = "|".join(
+        rf"{re.escape(item)}\s*:?"
+        for item in following_headings
+    )
+
     match = re.search(
-        rf"(?ims)^\s*{re.escape(heading)}\s*$\s*(.*?)"
+        rf"(?ims)"
+        rf"^\s*{heading_pattern}\s*$"
+        rf"\s*(.*?)"
         rf"(?=^\s*(?:{end_pattern})\s*$|\Z)",
         text,
     )
+
     return match.group(1).strip() if match else ""
 
-
 def format_rca_for_review(generated_text: str) -> str:
-    headings = tuple([f"Why {index}" for index in range(1, 6)])
-    root_cause = section_text(generated_text, "Root Cause", headings)
-    sections = [f"Root Cause\n\n{root_cause}"]
-
-    for index in range(1, 6):
-        heading = f"Why {index}"
-        following = tuple(f"Why {item}" for item in range(index + 1, 6))
-        value = section_text(generated_text, heading, following)
-        sections.append(f"{heading}\n\n{value}")
-
-    return "\n\n".join(sections).strip()
-
+    return normalize_rca(generated_text)
 
 def format_capa_for_review(generated_text: str) -> str:
-    headings = (
-        "Corrective Action",
-        "Preventive Action",
-        "Ownership",
-        "Monitoring",
-        "Lessons Learned",
-        "Reviewer Feedback",
-    )
-    sections = []
-    for index, heading in enumerate(headings[:-1]):
-        value = section_text(generated_text, heading, headings[index + 1 :])
-        if heading == "Lessons Learned" or value:
-            sections.append(f"{heading}\n\n{value}")
-    return "\n\n".join(sections).strip()
-
+    return normalize_capa(generated_text)
 
 def invalidate_rca() -> None:
     st.session_state.rca_validated = False
@@ -429,7 +422,9 @@ def incident_intake(is_busy: bool) -> None:
             # Record generation time and load info
             load_rca_model_wrapper()
             start_time = datetime.now()
-            rca = format_rca_for_review(generate_rca(incident))
+            raw_rca = generate_rca(incident)
+            st.session_state.rca_raw = raw_rca
+            rca = format_rca_for_review(raw_rca)
             st.session_state.rca_generation_time = (datetime.now() - start_time).total_seconds()
             
             st.session_state.rca_text = rca
@@ -545,12 +540,13 @@ def rca_review(is_busy: bool) -> None:
         with st.spinner("Regenerating RCA using Qwen model..."):
             feedback_val = st.session_state.get("rca_feedback", "").strip()
             start_time = datetime.now()
-            rca = format_rca_for_review(
-                generate_rca(
-                    st.session_state.incident_text,
-                    feedback_val,
-                )
+            raw_rca = generate_rca(
+                incident_text=st.session_state.incident_text,
+                feedback=feedback_val,
+                current_rca=st.session_state.rca_text,
             )
+            st.session_state.rca_raw = raw_rca
+            rca = format_rca_for_review(raw_rca)
             st.session_state.rca_generation_time = (datetime.now() - start_time).total_seconds()
             invalidate_rca()
             st.session_state.pending_rca_editor = rca
@@ -577,12 +573,12 @@ def rca_review(is_busy: bool) -> None:
 
         with st.spinner("Generating CAPA using Mistral model..."):
             start_time = datetime.now()
-            capa = format_capa_for_review(
-                generate_capa(
-                    st.session_state.incident_text,
-                    st.session_state.rca_text,
-                )
+            raw_capa = generate_capa(
+                incident_text=st.session_state.incident_text,
+                rca_text=st.session_state.rca_text,
             )
+            st.session_state.capa_raw = raw_capa
+            capa = format_capa_for_review(raw_capa)
             st.session_state.capa_generation_time = (datetime.now() - start_time).total_seconds()
             st.session_state.capa_text = capa
             st.session_state.capa_editor = capa
@@ -687,13 +683,14 @@ def capa_review(is_busy: bool) -> None:
         with st.spinner("Regenerating CAPA using Mistral model..."):
             feedback_val = st.session_state.get("capa_feedback", "").strip()
             start_time = datetime.now()
-            capa = format_capa_for_review(
-                generate_capa(
-                    st.session_state.incident_text,
-                    st.session_state.rca_text,
-                    feedback_val,
-                )
+            raw_capa = generate_capa(
+                incident_text=st.session_state.incident_text,
+                rca_text=st.session_state.rca_text,
+                feedback=feedback_val,
+                current_capa=st.session_state.capa_text,
             )
+            st.session_state.capa_raw = raw_capa
+            capa = format_capa_for_review(raw_capa)
             st.session_state.capa_generation_time = (datetime.now() - start_time).total_seconds()
             invalidate_capa()
             st.session_state.pending_capa_editor = capa
@@ -705,7 +702,9 @@ def capa_review(is_busy: bool) -> None:
         with st.spinner("Validating CAPA..."):
             start_time = datetime.now()
             st.session_state.capa_flags = CAPAValidator().validate(
-                st.session_state.incident_text, st.session_state.capa_text
+                st.session_state.incident_text,
+                st.session_state.capa_text,
+                st.session_state.rca_text
             )
             st.session_state.capa_validation_time = (datetime.now() - start_time).total_seconds()
             st.session_state.capa_validated = True

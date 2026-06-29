@@ -1,9 +1,11 @@
 import gc
-import torch
-from unsloth import FastLanguageModel
+import os
 
 MODEL_NAME = "unsloth/Qwen2.5-3B-Instruct-bnb-4bit"
-ADAPTER_PATH = "/content/it-rca-capa-framework/IT_RCA_CAPA/qwen_rca_adapter"
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
+ADAPTER_PATH = os.path.join(PROJECT_ROOT, "qwen_rca_adapter")
 
 # Global model objects
 model = None
@@ -18,6 +20,8 @@ def load_qwen():
         return
 
     print("Loading Qwen...")
+
+    from unsloth import FastLanguageModel
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=MODEL_NAME,
@@ -48,9 +52,13 @@ def unload_qwen():
 
     gc.collect()
 
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except ImportError:
+        pass
 
     print("Qwen Unloaded")
 
