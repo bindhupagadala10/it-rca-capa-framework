@@ -30,25 +30,48 @@ Reviewer Feedback:
 {feedback}
 
 Instructions:
+
 1. Revise the Current RCA by addressing the Reviewer Feedback.
-2. Edit only the necessary parts to incorporate the feedback, and preserve the rest of the Current RCA's structure and valid information. Do NOT start from scratch.
-3. Keep the analysis strictly focused on the evidence and systems mentioned in the incident details. Do NOT introduce unrelated software tools, hardware, or technologies that are not part of the incident context.
-4. Provide a technical, specific, and detailed explanation. Do NOT use generic or vague phrases (e.g., do not write lazy explanations like "human error", "mistake", "issue occurred", or "lack of awareness").
-5. The output must contain exactly these sections in this order:
+2. Edit only the necessary parts to incorporate the feedback while preserving all valid technical findings. Do NOT rewrite the RCA from scratch.
+3. Keep the analysis strictly focused on the evidence and systems mentioned in the incident details. Do NOT introduce unrelated technologies, products, software, hardware, or assumptions.
+4. Provide technical, specific, and evidence-based reasoning. Avoid vague explanations such as "human error", "mistake", "issue occurred", or "lack of awareness".
+
+Generate EXACTLY the following sections in this order:
+
 Root Cause
+
 Why 1
+
 Why 2
+
 Why 3
+
 Why 4
+
 Why 5
 
-6. For each "Why [Number]" section, provide a specific question on one line, followed by the word "Answer:" on its own line, followed by the specific technical answer explaining the cause. For example:
-Why 1
-Why did the application fail to connect to the database?
-Answer:
-The connection pool was exhausted because long-running reports held onto connections.
+Requirements:
 
-7. Output ONLY the RCA sections. Do NOT repeat the incident description, business impact, timeline, or add any conversational introduction/conclusion.
+• Under "Root Cause", write a Root Cause Summary consisting of 4-6 complete sentences.
+• This section MUST NOT be empty.
+• Summarize the underlying technical failure, contributing factors, and systemic cause identified from the complete 5-Why analysis.
+• Do NOT simply copy Why 5.
+• The Root Cause Summary must be consistent with the 5-Why analysis.
+
+For each Why section:
+
+Why X
+Write one specific WHY question.
+
+Answer:
+Write the detailed technical answer on the next line.
+
+Generate EXACTLY five Why sections.
+Stop after Why 5.
+Do NOT generate Why 6 or any additional sections.
+
+Output ONLY the RCA.
+Do NOT repeat the incident description, business impact, investigation timeline, reviewer feedback, or add any introduction or conclusion.
 """
     else:
         # Initial Generation Prompt
@@ -61,24 +84,82 @@ Incident Details:
 - Investigation Timeline: {timeline}
 
 Instructions:
-1. Perform a thorough 5-Why analysis to trace the technical failure to its systemic root cause.
-2. Keep the analysis strictly focused on the evidence and systems mentioned in the incident details. Do NOT introduce unrelated software tools, hardware, or technologies that are not part of the incident context.
-3. Provide a technical, specific, and detailed explanation. Do NOT use generic or vague phrases (e.g., do not write lazy explanations like "human error", "mistake", "issue occurred", or "lack of awareness").
-4. The output must contain exactly these sections in this order:
+
+1. Perform a complete 5-Why analysis to identify the underlying systemic technical root cause.
+2. Keep the analysis strictly focused on the evidence contained in the incident. Do NOT introduce unrelated technologies, products, software, hardware, or assumptions.
+3. Provide technical, specific, and evidence-based reasoning. Avoid vague explanations such as "human error", "mistake", "issue occurred", or "lack of awareness".
+
+Generate EXACTLY the following sections in this order:
+
 Root Cause
+
 Why 1
+
 Why 2
+
 Why 3
+
 Why 4
+
 Why 5
 
-5. For each "Why [Number]" section, provide a specific question on one line, followed by the word "Answer:" on its own line, followed by the specific technical answer explaining the cause. For example:
-Why 1
-Why did the application fail to connect to the database?
-Answer:
-The connection pool was exhausted because long-running reports held onto connections.
+Requirements:
 
-6. Output ONLY the RCA sections. Do NOT repeat the incident description, business impact, timeline, or add any conversational introduction/conclusion.
+• Under "Root Cause", write a Root Cause Summary consisting of 4-6 complete sentences.
+• This section MUST NOT be empty.
+• Summarize the overall technical failure, contributing factors, and systemic cause discovered from the complete 5-Why analysis.
+• Do NOT simply repeat Why 5.
+• The Root Cause Summary should synthesize the entire analysis.
+
+For each Why section:
+
+Why X
+Write one specific WHY question.
+
+Answer:
+Write the detailed technical answer on the next line.
+
+Generate EXACTLY five Why sections.
+Stop after Why 5.
+Do NOT generate Why 6 or any additional sections.
+
+Output ONLY the RCA.
+Do NOT repeat the incident description, business impact, investigation timeline, or add any introduction or conclusion.
+Output EXACTLY in this format.
+
+Root Cause
+<Write a 4-6 sentence root cause summary here>
+
+Why 1
+<Write one Why question>
+Answer:
+<Write one answer>
+
+Why 2
+<Write one Why question>
+Answer:
+<Write one answer>
+
+Why 3
+<Write one Why question>
+Answer:
+<Write one answer>
+
+Why 4
+<Write one Why question>
+Answer:
+<Write one answer>
+
+Why 5
+<Write one Why question>
+Answer:
+<Write one answer>
+
+The Root Cause section must appear BEFORE Why 1.
+Do not move it.
+Do not repeat it.
+Do not generate Why 6.
+End the response immediately after the Why 5 answer.
 """
 
     return qwen_generate_rca(prompt)
@@ -96,6 +177,41 @@ def generate_rca(
     """
     Compatible wrapper that parses incident_text and calls generate_rca_from_incident.
     Returns the RAW model output.
+          Output EXACTLY in this format.
+
+      Root Cause
+      <Write a 4-6 sentence root cause summary here>
+
+      Why 1
+      <Write one Why question>
+      Answer:
+      <Write one answer>
+
+      Why 2
+      <Write one Why question>
+      Answer:
+      <Write one answer>
+
+      Why 3
+      <Write one Why question>
+      Answer:
+      <Write one answer>
+
+      Why 4
+      <Write one Why question>
+      Answer:
+      <Write one answer>
+
+      Why 5
+      <Write one Why question>
+      Answer:
+      <Write one answer>
+
+      The Root Cause section must appear BEFORE Why 1.
+      Do not move it.
+      Do not repeat it.
+      Do not generate Why 6.
+      End the response immediately after the Why 5 answer.
     """
 
     problem_description = ""

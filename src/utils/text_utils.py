@@ -52,15 +52,22 @@ def normalize_rca(text: str) -> str:
     lines = text.splitlines()
     processed_lines = []
     
-    rc_pattern = re.compile(r'^\s*#*\s*\*?\*?\s*(Root\s+Cause\s+Summary|Root\s+Causes?)\s*:?\s*\*?\*?\s*$', re.I)
-    why_pattern = re.compile(r'^\s*#*\s*\*?\*?\s*Why\s+([1-5])\s*(?:[:\-\.\s]\s*\*?\*?(.*))?$', re.I)
+    rc_pattern = re.compile(r'^\s*#*\s*\*?\*?\s*(Root\s+Cause\s+Summary|Root\s+Causes?)\s*\*?\*?\s*:?\s*\*?\*?\s*$', re.I)
+    why_pattern = re.compile(r'^\s*#*\s*\*?\*?\s*Why\s+([1-5])\s*\*?\*?\s*(?:[:\-\.\s]\s*\*?\*?(.*))?$', re.I)
     
+    allowed_section_active = False
+    disallowed_pattern = re.compile(
+        r'^\s*#*\s*\*?\*?\s*(Problem\s+Description|Business\s+Impact|Investigation\s+Timeline|Incident|Reviewer\s+Feedback)\s*\*?\*?\s*:?\s*\*?\*?\s*$',
+        re.I
+    )
+
     for line in lines:
         line_str = line.strip()
         
         # Check Root Cause
         if rc_pattern.match(line_str):
             processed_lines.append("Root Cause")
+            allowed_section_active = True
             continue
             
         # Check Why 1-5
@@ -69,11 +76,17 @@ def normalize_rca(text: str) -> str:
             why_num = why_match.group(1)
             remaining = why_match.group(2)
             processed_lines.append(f"Why {why_num}")
+            allowed_section_active = True
             if remaining and remaining.strip():
                 processed_lines.append(remaining.strip())
             continue
             
-        processed_lines.append(line)
+        if disallowed_pattern.match(line_str):
+            allowed_section_active = False
+            continue
+            
+        if allowed_section_active:
+            processed_lines.append(line)
         
     result = "\n".join(processed_lines)
     
@@ -89,7 +102,7 @@ def normalize_rca(text: str) -> str:
         )
 
     result = re.sub(
-        r'\s*Root Cause\s*',
+        r'(?m)^\s*Root Cause\s*$',
         '\n\nRoot Cause\n',
         result,
     )
